@@ -1,0 +1,95 @@
+@startuml state-payment
+' PayLink - Payment life-cycle State Diagram (Phase 1) - Owner: Student 2 (Requirements Co-Lead)
+' Source of truth: brief section 2.5 (the table of allowed transitions). Nothing else is allowed.
+' Generated with AI assistance, then checked line by line against the brief table.
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam state {
+  BackgroundColor #E8F5EE
+  BorderColor #2E7D5B
+  ArrowColor #455A64
+  FontSize 13
+}
+skinparam state<<final>> {
+  BackgroundColor #EEEEEE
+  BorderColor #455A64
+}
+skinparam state<<uncertain>> {
+  BackgroundColor #FFF8E1
+  BorderColor #F9A825
+}
+skinparam state<<failed>> {
+  BackgroundColor #FDECEA
+  BorderColor #C62828
+}
+
+title PayLink - Payment Life Cycle (FR-11)
+
+state Initiated
+state FundsHeld
+state SentToBiller
+state Unknown <<uncertain>>
+state Failed <<failed>>
+state Rejected <<final>>
+state Completed <<final>>
+state Refunded <<final>>
+
+[*] --> Initiated : payment created\n(idempotency key stored)
+
+Initiated --> FundsHeld : fraud checks pass AND\nwallet has enough funds
+Initiated --> Rejected : fraud check fails OR\nfunds insufficient
+
+FundsHeld --> SentToBiller : request sent to biller
+
+SentToBiller --> Completed : biller confirms
+SentToBiller --> Failed : biller refuses
+SentToBiller --> Unknown : no answer within timeout\n(10 s for live billers)
+
+Unknown --> Completed : biller later confirms\n(callback, retry or settlement file)
+Unknown --> Failed : biller later refuses OR\nreconciliation finds no payment
+Unknown --> Unknown : re-query, still no answer\n(after 1, 5, 15 min; max 3)
+
+Failed --> Refunded : hold released to the wallet
+
+Completed --> [*]
+Rejected --> [*]
+Refunded --> [*]
+
+note right of Initiated
+  Entry: nothing is held yet.
+  Rejected here means no money moved
+  and the biller is never called.
+end note
+
+note right of FundsHeld
+  Entry: ledger moves amount + fee
+  from Available to Held (FR-12).
+  The biller is called only after this.
+end note
+
+note bottom of Unknown
+  Money stays HELD.
+  Never refunded automatically:
+  only after the system is sure the
+  biller did not receive the payment.
+end note
+
+note bottom of Failed
+  Not final: the hold must still be released.
+  Entry action of Refunded: release hold (FR-12).
+end note
+
+note left of Completed
+  Entry: hold becomes final charge,
+  PayLink fee income is credited,
+  agent commission recorded (40% of fee),
+  SMS + push sent (FR-22).
+end note
+
+legend right
+  <b>Final states:</b> Completed, Rejected, Refunded
+  Any event not drawn here is NOT a valid transition
+  and is rejected without changing the payment.
+  Duplicate callbacks in a final state are ignored and logged.
+endlegend
+@enduml
