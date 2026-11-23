@@ -1,113 +1,44 @@
-@startuml use-case
-' PayLink - Use-Case Diagram (Phase 1) - Owner: Student 1 (Requirements & Product Lead)
-' PlantUML source of truth. Generated with AI assistance and reviewed by the team.
+@startuml
 left to right direction
 skinparam packageStyle rectangle
-skinparam shadowing false
-skinparam linetype ortho
-skinparam nodesep 28
-skinparam ranksep 55
-skinparam actorStyle awesome
-skinparam usecase {
-  BackgroundColor #E8F5EE
-  BorderColor #2E7D5B
-  ArrowColor #455A64
-}
-skinparam rectangle {
-  BorderColor #607D8B
-  BackgroundColor #FAFCFB
-}
 
-actor "Customer" as Customer
-actor "Agent" as Agent
-actor "Admin" as Admin
-actor "Support Employee" as Support
+actor Customer
+actor Administrator
+actor Agent
+actor Biller
 
-actor "Biller Systems\n(ElectroCo, AquaCo,\nTopUpNet, NetCo)" as Biller <<external>>
-actor "SMS / Email / Push\nProvider" as Notifier <<external>>
-actor "Card Gateway\n(simulated)" as Card <<external>>
-
-rectangle "PayLink Backend" {
-  package "Accounts & Wallet" {
-    usecase "Register account\n(FR-1)" as UC_Register
-    usecase "Upgrade to verified\n(FR-2)" as UC_Upgrade
-    usecase "View balance & history\n(FR-3)" as UC_Balance
-    usecase "Top up wallet\n(FR-4)" as UC_TopUp
-    usecase "Record ledger entry\n(FR-5)" as UC_Ledger
-    usecase "Request refund\n(FR-27)" as UC_ReqRefund
-    usecase "Approve refund\n(FR-27)" as UC_ApproveRefund
-  }
-  package "Biller Catalog" {
-    usecase "View billers & input fields\n(FR-7)" as UC_ViewBillers
-    usecase "Manage billers & services\n(FR-6)" as UC_Manage
-  }
-  package "Payments & Integrations" {
-    usecase "Run bill inquiry\n(FR-8)" as UC_Inquiry
-    usecase "Pay a bill\n(FR-9..FR-12)" as UC_Pay
-    usecase "Pay on behalf of customer\n(FR-17)" as UC_AgentPay
-    usecase "Calculate fee\n(FR-16)" as UC_Fee
-    usecase "Run fraud checks\n(FR-18, FR-19)" as UC_Fraud
-    usecase "Hold funds\n(FR-12)" as UC_Hold
-    usecase "Send payment to biller\n(FR-15)" as UC_Send
-    usecase "Handle timeout, retry\nand callback\n(FR-13, FR-14)" as UC_Callback
-  }
-  package "Operations & Support" {
-    usecase "Search payment\n(FR-20)" as UC_Search
-    usecase "Block / unblock account\n(FR-21)" as UC_Block
-    usecase "Edit fees & limits\n(FR-24)" as UC_EditCfg
-    usecase "View daily totals\n(FR-28)" as UC_Totals
-    usecase "Reconcile with settlement file\n(FR-26)" as UC_Recon
-    usecase "Write audit log\n(FR-25)" as UC_Audit
-    usecase "Send notification\n(FR-22, FR-23)" as UC_Notify
-  }
+rectangle "PayLink System" {
+    usecase "Register Account" as UC1
+    usecase "Upgrade Verification Level" as UC2
+    usecase "View Wallet Balance\nand Transaction History" as UC3
+    usecase "Top Up Wallet" as UC4
+    usecase "Manage Billers\nand Services" as UC5
+    usecase "View Billers and\nRequired Input Fields" as UC6
+    usecase "Run Bill Inquiry\n(View Amount, Fee and Total)" as UC7
+    usecase "Pay Bill from Wallet" as UC8
 }
 
-' Actor associations (undirected UML associations)
-Customer -- UC_Register
-Customer -- UC_Balance
-Customer -- UC_TopUp
-Customer -- UC_ViewBillers
-Customer -- UC_Inquiry
-Customer -- UC_Pay
-Customer -- UC_ReqRefund
-Agent -- UC_AgentPay
-Agent -- UC_TopUp
-Admin -- UC_Manage
-Admin -- UC_Upgrade
-Admin -- UC_EditCfg
-Admin -- UC_Totals
-Support -- UC_Search
-Support -- UC_Block
-Support -- UC_ApproveRefund
-Support -- UC_Recon
+Customer -- UC1
+Customer -- UC2
+Customer -- UC3
+Customer -- UC4
+Agent -- UC4
+Administrator -- UC5
+Customer -- UC6
+Customer -- UC7
+Biller -- UC7
+Customer -- UC8
+Biller -- UC8
 
-' External system associations
-UC_TopUp -- Card
-UC_Send -- Biller
-UC_Inquiry -- Biller
-UC_Callback -- Biller
-UC_Recon -- Biller
-UC_Notify -- Notifier
+note right of UC4
+  Top-up channels:
+  - Simulated card
+  - Agent cash
 
-' Include / extend relationships
-UC_Pay ..> UC_Inquiry : <<include>>
-UC_Pay ..> UC_Fraud : <<include>>
-UC_Pay ..> UC_Hold : <<include>>
-UC_Pay ..> UC_Send : <<include>>
-UC_Pay ..> UC_Notify : <<include>>
-UC_AgentPay ..> UC_Pay : <<include>>
-UC_Inquiry ..> UC_Fee : <<include>>
-UC_Callback ..> UC_Send : <<extend>>
-UC_Hold ..> UC_Ledger : <<include>>
-UC_TopUp ..> UC_Ledger : <<include>>
-UC_ApproveRefund ..> UC_Ledger : <<include>>
-UC_Manage ..> UC_Audit : <<include>>
-UC_EditCfg ..> UC_Audit : <<include>>
-UC_Block ..> UC_Audit : <<include>>
-UC_Ledger ..> UC_Audit : <<include>>
-
-note bottom of UC_ApproveRefund
-  Approval needs an existing refund request:
-  customer requests; support approves.
+  FR-5 applies to wallet balance changes:
+  each change creates a ledger entry,
+  and balances are calculated from
+  ledger entries.
 end note
+
 @enduml
