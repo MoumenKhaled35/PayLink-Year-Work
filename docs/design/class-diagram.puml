@@ -1,0 +1,217 @@
+@startuml class-diagram
+' PayLink - Domain Class Diagram (Phase 1) - Owner: Student 4 (Quality & DevOps Lead)
+' Aligned with req-p2.md, req-p3.md, state-payment.puml, and sequence diagrams.
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam class {
+  BackgroundColor #E8F5EE
+  BorderColor #2E7D5B
+  ArrowColor #455A64
+  FontSize 12
+}
+skinparam enum {
+  BackgroundColor #FFF8E1
+  BorderColor #F9A825
+}
+
+title PayLink - Domain Class Diagram
+
+enum VerificationLevel {
+  BASIC
+  VERIFIED
+}
+
+enum AccountStatus {
+  ACTIVE
+  BLOCKED
+}
+
+enum PaymentState {
+  Initiated
+  FundsHeld
+  Rejected
+  SentToBiller
+  Completed
+  Failed
+  Unknown
+  Refunded
+}
+
+enum LedgerEntryType {
+  TOP_UP
+  HOLD
+  RELEASE
+  CAPTURE
+  FEE_INCOME
+  COMMISSION
+  REFUND
+}
+
+enum BalanceBucket {
+  AVAILABLE
+  HELD
+}
+
+class Customer {
+  +id: UUID
+  +phone_number: str
+  +full_name: str
+  +verification_level: VerificationLevel
+  +status: AccountStatus
+  +blocked_until: datetime?
+  +created_at: datetime
+  +is_blocked(): bool
+  +get_daily_limit(): Decimal
+}
+
+class Agent {
+  +id: UUID
+  +customer_id: UUID
+  +terminal_code: str
+  +commission_rate: Decimal
+  +is_active: bool
+  +calculate_commission(fee: Decimal): Decimal
+}
+
+class Wallet {
+  +id: UUID
+  +owner_id: UUID
+  +currency: str
+  +available_balance: Decimal
+  +held_balance: Decimal
+  +updated_at: datetime
+  +has_sufficient_funds(amount: Decimal): bool
+  +recompute_from_ledger(entries: List<LedgerEntry>): void
+}
+
+class LedgerEntry {
+  +id: UUID
+  +wallet_id: UUID
+  +payment_id: UUID?
+  +entry_type: LedgerEntryType
+  +bucket: BalanceBucket
+  +amount: Decimal
+  +reference: str
+  +created_at: datetime
+}
+
+class Biller {
+  +id: UUID
+  +code: str
+  +name: str
+  +protocol: str
+  +adapter_key: str
+  +is_active: bool
+  +promo_start: date?
+  +promo_end: date?
+  +is_promo_active(on_date: date): bool
+}
+
+class BillerService {
+  +id: UUID
+  +biller_id: UUID
+  +service_type: str
+  +required_fields: dict
+  +min_amount: Decimal
+  +max_amount: Decimal
+  +fee_type: str
+  +fee_config: dict
+  +is_active: bool
+  +calculate_fee(amount: Decimal, promo_active: bool): Decimal
+}
+
+class Payment {
+  +id: UUID
+  +reference: str
+  +idempotency_key: str
+  +customer_id: UUID
+  +agent_id: UUID?
+  +biller_service_id: UUID
+  +account_identifier: str
+  +bill_amount: Decimal
+  +service_fee: Decimal
+  +agent_commission: Decimal
+  +total_amount: Decimal
+  +state: PaymentState
+  +biller_tx_id: str?
+  +failure_reason: str?
+  +retry_count: int
+  +created_at: datetime
+  +transition_to(new_state: PaymentState, event: str, reason: str): PaymentStateHistory
+}
+
+class PaymentStateHistory {
+  +id: UUID
+  +payment_id: UUID
+  +old_state: PaymentState?
+  +new_state: PaymentState
+  +event: str
+  +reason: str
+  +created_at: datetime
+}
+
+class Notification {
+  +id: UUID
+  +payment_id: UUID
+  +customer_id: UUID
+  +channel: str
+  +status: str
+  +retry_count: int
+  +last_error: str?
+  +created_at: datetime
+  +delivered_at: datetime?
+  +mark_delivered(): void
+  +record_retry_failure(error: str): void
+}
+
+class ReconciliationRecord {
+  +id: UUID
+  +biller_id: UUID
+  +settlement_date: date
+  +payment_reference: str
+  +paylink_state: PaymentState?
+  +biller_status: str
+  +paylink_amount: Decimal?
+  +biller_amount: Decimal
+  +discrepancy_type: str?
+  +resolved: bool
+}
+
+class RefundRequest {
+  +id: UUID
+  +payment_id: UUID
+  +requested_by: UUID
+  +approved_by: UUID?
+  +status: str
+  +reason: str
+  +created_at: datetime
+  +approve(support_id: UUID): void
+  +reject(support_id: UUID, reason: str): void
+}
+
+class AuditLog {
+  +id: UUID
+  +actor_id: UUID
+  +actor_role: str
+  +action_type: str
+  +entity_type: str
+  +entity_id: UUID
+  +old_value: str?
+  +new_value: str?
+  +reason: str
+  +created_at: datetime
+}
+
+Customer "1" -- "1" Wallet : owns >
+Customer "1" -- "0..1" Agent : registered as >
+Wallet "1" *-- "0..*" LedgerEntry : computed from >
+Customer "1" -- "0..*" Payment : initiates >
+Agent "0..1" -- "0..*" Payment : processes >
+Biller "1" *-- "1..*" BillerService : offers >
+BillerService "1" -- "0..*" Payment : paid for >
+Payment "1" *-- "1..*" PaymentStateHistory : tracks >
+Payment "1" -- "0..*" LedgerEntry : generates >
+Payment "1" -- "0..*" Notification : triggers >
+Payment "1" -- "0..1" RefundRequest : disputed via >
+Biller "1" -- "0..*" ReconciliationRecord : reconciled in >
+@enduml
