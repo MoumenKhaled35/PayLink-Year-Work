@@ -1,0 +1,66 @@
+@startuml seq-refund
+' PayLink - Sequence Diagram: Refund a Failed Payment (Phase 1) - Owner: Student 3 (Architecture Lead)
+' Covers Brief Section 2.5 (SentToBiller/Unknown -> Failed -> Refunded), FR-12, FR-22, FR-25, Hard Case 3.
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam sequence {
+  ArrowColor #455A64
+  LifeLineBorderColor #2E7D5B
+  ParticipantBackgroundColor #E8F5EE
+  ParticipantBorderColor #2E7D5B
+}
+
+title PayLink - Sequence Diagram: Refund a Failed Payment (FR-12, FR-22)
+
+participant "BillerAdapter / RetryWorker /\nReconciliationJob" as Trigger
+participant "PaymentService" as PaySvc
+participant "WalletService" as Wallet
+participant "LedgerRepository" as Ledger
+participant "AuditService" as Audit
+participant "NotificationService" as Notif
+actor "Customer" as User
+
+note over PaySvc, Wallet
+  Precondition: Payment is in SentToBiller or Unknown
+  and totalAmount (amount + fee) is currently in held_balance.
+end note
+
+alt Immediate biller refusal (from SentToBiller - Hard Case 3)
+  Trigger -> PaySvc : handleBillerRefusal(paymentRef, billerErrorCode)
+else Late refusal via retry, async callback, or missing in settlement file (from Unknown)
+  Trigger -> PaySvc : confirmPaymentFailure(paymentRef, failureReason)
+end
+
+activate PaySvc
+
+PaySvc -> PaySvc : validateTransition(currentState -> Failed)
+PaySvc -> PaySvc : transitionState(currentState -> Failed)
+PaySvc -> Audit : logStateChange(paymentRef, currentState, Failed, failureReason)
+
+PaySvc -> Wallet : releaseHold(walletId, totalAmount, paymentRef, failureReason)
+activate Wallet
+Wallet -> Ledger : insertEntry(DEBIT_HELD, -totalAmount, REFUND_RELEASE)
+Wallet -> Ledger : insertEntry(CREDIT_AVAILABLE, +totalAmount, REFUND_RELEASE)
+note right of Ledger
+  Immutable ledger entries only.
+  available_balance & held_balance are
+  recomputed from ledger sum (FR-5).
+end note
+Wallet -> Audit : logMoneyMovement(HOLD_RELEASE, totalAmount, paymentRef)
+Wallet --> PaySvc : holdReleased
+deactivate Wallet
+
+PaySvc -> PaySvc : transitionState(Failed -> Refunded)
+PaySvc -> Audit : logStateChange(paymentRef, Failed, Refunded, "Hold released to wallet")
+
+PaySvc ->> Notif : notifyPaymentFailedAndRefunded(userId, paymentRef, totalAmount, failureReason)
+activate Notif
+Notif -> User : Send SMS + Push ("Payment failed: <reason>. <totalAmount> EGP returned to wallet.")
+note right of Notif
+  If SMS fails, NotificationService retries
+  up to 3 times before marking undelivered (FR-23).
+end note
+deactivate Notif
+
+deactivate PaySvc
+@enduml

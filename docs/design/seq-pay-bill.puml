@@ -1,0 +1,136 @@
+@startuml seq-pay-bill
+' PayLink - Sequence Diagram: Pay a Bill (Phase 1) - Owner: Student 3 (Architecture Lead)
+' Covers Brief Section 2.2, Section 2.5, FR-9 to FR-16, FR-22, FR-25, and Hard Cases 1, 2, 3, 5.
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam sequence {
+  ArrowColor #455A64
+  LifeLineBorderColor #2E7D5B
+  ParticipantBackgroundColor #E8F5EE
+  ParticipantBorderColor #2E7D5B
+  ActorBackgroundColor #E8F5EE
+  ActorBorderColor #2E7D5B
+}
+
+title PayLink - Sequence Diagram: Pay a Bill (FR-9, FR-10, FR-12)
+
+actor "Customer / Agent" as User
+participant "APIController" as API
+participant "PaymentService" as PaySvc
+participant "FeeService" as FeeSvc
+participant "FraudCheckChain" as Fraud
+participant "WalletService" as Wallet
+participant "LedgerRepository" as Ledger
+participant "AuditService" as Audit
+participant "BillerAdapter" as Adapter
+participant "ExternalBiller" as Biller
+participant "NotificationService" as Notif
+
+User -> API : POST /payments (bill_id, amount, idempotency_key)
+activate API
+API -> PaySvc : initiatePayment(userId, billId, amount, idempotencyKey)
+activate PaySvc
+
+PaySvc -> PaySvc : checkIdempotency(userId, idempotencyKey)
+alt Duplicate idempotency_key (Hard Case 1)
+  PaySvc --> API : return original Payment result
+  API --> User : 200 OK (existing payment reference & state)
+else New request
+  PaySvc -> PaySvc : createPayment(state = Initiated)
+  PaySvc -> FeeSvc : calculateFee(billerId, amount, isAgent)
+  activate FeeSvc
+  FeeSvc --> PaySvc : fee, totalAmount (amount + fee)
+  deactivate FeeSvc
+
+  PaySvc -> Fraud : validate(userId, totalAmount)
+  activate Fraud
+  note right of Fraud
+    Chain of Responsibility:
+    1. AccountBlockedCheck
+    2. VelocityRuleCheck (<= 5 tx / 60s)
+    3. SingleAndDailyLimitCheck
+  end note
+  Fraud --> PaySvc : checksPassed
+  deactivate Fraud
+
+  alt Fraud check fails OR insufficient funds
+    PaySvc -> PaySvc : transitionState(Initiated -> Rejected)
+    PaySvc --> API : PaymentRejected(reason)
+    API --> User : 422 Unprocessable Entity (reason)
+  else Fraud checks pass AND sufficient available_balance
+    PaySvc -> Wallet : holdFunds(walletId, totalAmount, paymentRef)
+    activate Wallet
+    Wallet -> Ledger : insertEntry(DEBIT_AVAILABLE, -totalAmount)
+    Wallet -> Ledger : insertEntry(CREDIT_HELD, +totalAmount)
+    Wallet -> Audit : logMoneyMovement(HOLD, totalAmount, paymentRef)
+    Wallet --> PaySvc : holdConfirmed
+    deactivate Wallet
+
+    PaySvc -> PaySvc : transitionState(Initiated -> FundsHeld)
+    PaySvc -> PaySvc : transitionState(FundsHeld -> SentToBiller)
+
+    PaySvc -> Adapter : pay(paymentRef, billDetails, amount)
+    activate Adapter
+    Adapter -> Biller : sendPaymentRequest(paymentRef, payload) [timeout = 10s]
+    activate Biller
+
+    alt Biller confirms payment (< 10s)
+      Biller --> Adapter : 200 OK (billerTxId, status = CONFIRMED)
+      deactivate Biller
+      Adapter --> PaySvc : BillerSuccess(billerTxId)
+      deactivate Adapter
+
+      PaySvc -> Wallet : captureHold(walletId, amount, fee, agentId, paymentRef)
+      activate Wallet
+      Wallet -> Ledger : insertEntry(DEBIT_HELD, -totalAmount)
+      Wallet -> Ledger : insertEntry(CREDIT_BILLER_SETTLEMENT, amount)
+      Wallet -> Ledger : insertEntry(CREDIT_FEE_INCOME, netFee)
+      opt Agent channel payment (40% commission)
+        Wallet -> Ledger : insertEntry(CREDIT_AGENT_WALLET, commission)
+      end
+      Wallet -> Audit : logMoneyMovement(CAPTURE, totalAmount, paymentRef)
+      Wallet --> PaySvc : captureCompleted
+      deactivate Wallet
+
+      PaySvc -> PaySvc : transitionState(SentToBiller -> Completed)
+
+      PaySvc ->> Notif : notifyPaymentCompleted(userId, paymentRef, totalAmount)
+      activate Notif
+      note right of Notif
+        Async SMS + Push (FR-22).
+        Retries up to 3 times on failure
+        without rolling back payment (Hard Case 5).
+      end note
+      deactivate Notif
+
+      PaySvc --> API : PaymentCompleted(paymentRef, receipt)
+      API --> User : 200 OK (Completed + receipt)
+
+    else Biller timeout (> 10s - Hard Case 2)
+      Biller --x Adapter : TimeoutException
+      Adapter --> PaySvc : BillerTimeout
+      PaySvc -> PaySvc : transitionState(SentToBiller -> Unknown)
+      note over PaySvc, Wallet
+        Money stays in HELD balance.
+        Never auto-refunded; scheduled for
+        re-query retries at 1, 5, 15 min (FR-13).
+      end note
+      PaySvc --> API : PaymentProcessing(state = Unknown)
+      API --> User : 202 Accepted ("Payment is being processed")
+
+    else Biller refuses payment (Hard Case 3)
+      Biller --> Adapter : ErrorResponse(billerErrorCode)
+      Adapter --> PaySvc : BillerRefused(mappedReason)
+      PaySvc -> PaySvc : transitionState(SentToBiller -> Failed)
+      ref over PaySvc, Wallet, Notif
+        See seq-refund.puml (Release Hold & Notify Failure)
+      end ref
+      PaySvc --> API : PaymentFailed(state = Refunded, reason)
+      API --> User : 400 Bad Request (Failed & Refunded + reason)
+    end
+  end
+end
+
+deactivate PaySvc
+deactivate API
+@enduml
