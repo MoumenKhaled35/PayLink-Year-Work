@@ -1,44 +1,126 @@
-@startuml
+@startuml PayLink_UCD
 left to right direction
 skinparam packageStyle rectangle
+skinparam shadowing false
 
 actor Customer
-actor Administrator
 actor Agent
-actor Biller
+actor Admin
+actor "Support Employee" as Support
+actor "Finance / Operations" as Finance
+actor "Compliance / Auditor" as Auditor
+actor Biller <<external>>
+actor "Card Gateway" as Card <<external>>
+actor "SMS / Push Provider" as Notifier <<external>>
 
-rectangle "PayLink System" {
-    usecase "Register Account" as UC1
-    usecase "Upgrade Verification Level" as UC2
-    usecase "View Wallet Balance\nand Transaction History" as UC3
-    usecase "Top Up Wallet" as UC4
-    usecase "Manage Billers\nand Services" as UC5
-    usecase "View Billers and\nRequired Input Fields" as UC6
-    usecase "Run Bill Inquiry\n(View Amount, Fee and Total)" as UC7
-    usecase "Pay Bill from Wallet" as UC8
+rectangle "PayLink Backend System" {
+
+    package "Accounts & Wallet" {
+        usecase "Register Account\n(FR-1)" as FR1
+        usecase "Upgrade Verification\n(FR-2)" as FR2
+        usecase "View Balance & History\n(FR-3)" as FR3
+        usecase "Top Up Wallet\n(FR-4)" as FR4
+        usecase "Ledger & Balances\n(FR-5)" as FR5
+    }
+
+    package "Biller Catalog" {
+        usecase "Manage Billers & Services\n(FR-6)" as FR6
+        usecase "View Billers & Input Fields\n(FR-7)" as FR7
+    }
+
+    package "Payments" {
+        usecase "Bill Inquiry\n(FR-8)" as FR8
+        usecase "Pay a Bill\n(FR-9)" as FR9
+        usecase "Idempotency\n(FR-10)" as FR10
+        usecase "Payment Lifecycle\n(FR-11)" as FR11
+        usecase "Hold / Release Funds\n(FR-12)" as FR12
+        usecase "Timeout & Retry\n(FR-13)" as FR13
+        usecase "Async Callbacks\n(FR-14)" as FR14
+        usecase "Biller Integration\n(FR-15)" as FR15
+        usecase "Fees & Promotions\n(FR-16)" as FR16
+        usecase "Pay on Behalf\n(FR-17)" as FR17
+    }
+
+    package "Fraud & Risk" {
+        usecase "Payment & Daily Limits\n(FR-18)" as FR18
+        usecase "Excessive Attempts Blocking\n(FR-19)" as FR19
+    }
+
+    package "Operations & Support" {
+        usecase "Search Payment & History\n(FR-20)" as FR20
+        usecase "Block / Unblock Account\n(FR-21)" as FR21
+        usecase "SMS & Push Notifications\n(FR-22)" as FR22
+        usecase "Retry Notifications\n(FR-23)" as FR23
+        usecase "Configure Fees & Limits\n(FR-24)" as FR24
+        usecase "Audit Log\n(FR-25)" as FR25
+        usecase "Settlement & Reconciliation\n(FR-26)" as FR26
+        usecase "Request Refund\n(FR-27)" as FR27
+        usecase "Approve / Reject Refund\n(FR-27)" as FR27A
+        usecase "Daily Financial Totals\n(FR-28)" as FR28
+    }
 }
 
-Customer -- UC1
-Customer -- UC2
-Customer -- UC3
-Customer -- UC4
-Agent -- UC4
-Administrator -- UC5
-Customer -- UC6
-Customer -- UC7
-Biller -- UC7
-Customer -- UC8
-Biller -- UC8
+' Actor Associations
+Customer -- FR1
+Customer -- FR3
+Customer -- FR4
+Customer -- FR7
+Customer -- FR8
+Customer -- FR9
+Customer -- FR27
 
-note right of UC4
-  Top-up channels:
-  - Simulated card
-  - Agent cash
+Agent -- FR4
+Agent -- FR17
 
-  FR-5 applies to wallet balance changes:
-  each change creates a ledger entry,
-  and balances are calculated from
-  ledger entries.
-end note
+Admin -- FR2
+Admin -- FR6
+Admin -- FR24
+Admin -- FR28
+
+Support -- FR20
+Support -- FR21
+Support -- FR27A
+
+Finance -- FR26
+Auditor -- FR5
+Auditor -- FR25
+
+Card -- FR4
+Biller -- FR13
+Biller -- FR14
+Biller -- FR15
+Biller -- FR26
+Notifier -- FR22
+Notifier -- FR23
+
+' Include Relationships
+FR9 ..> FR10 : <<include>>
+FR9 ..> FR11 : <<include>>
+FR9 ..> FR12 : <<include>>
+FR9 ..> FR15 : <<include>>
+FR9 ..> FR16 : <<include>>
+FR9 ..> FR18 : <<include>>
+FR9 ..> FR19 : <<include>>
+FR8 ..> FR16 : <<include>>
+FR17 ..> FR9 : <<include>>
+
+FR4 ..> FR5 : <<include>>
+FR12 ..> FR5 : <<include>>
+FR27A ..> FR5 : <<include>>
+
+FR9 ..> FR22 : <<include>>
+FR27A ..> FR22 : <<include>>
+FR23 ..> FR22 : <<extend>>
+
+FR13 ..> FR15 : <<extend>>
+FR14 ..> FR11 : <<include>>
+
+FR2 ..> FR25 : <<include>>
+FR4 ..> FR25 : <<include>>
+FR6 ..> FR25 : <<include>>
+FR12 ..> FR25 : <<include>>
+FR21 ..> FR25 : <<include>>
+FR24 ..> FR25 : <<include>>
+FR27A ..> FR25 : <<include>>
 
 @enduml
